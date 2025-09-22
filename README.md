@@ -45,18 +45,24 @@ By enabling offline access, data synchronization, and simple user-friendly inter
 - Android Studio / VS Code  
 
 ### Steps  
-```bash
 # Clone the repository
+```bash
 git clone https://github.com/your-username/AshaSetu.git
-
+```
 # Navigate into the project
+```bash
 cd AshaSetu
+```
 
 # Install dependencies (example for React Native)
+```bash
 npm install
+```
 
 # Run the app
+``bash
 npm start
+``
 
 ### 📂 Repository Structure (Proposed)
 AshaSetu/
