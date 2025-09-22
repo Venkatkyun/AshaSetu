@@ -60,9 +60,9 @@ npm install
 ```
 
 # Run the app
-``bash
+```bash
 npm start
-``
+```
 
 ### 📂 Repository Structure (Proposed)
 AshaSetu/
