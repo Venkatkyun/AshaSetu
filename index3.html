@@ -1,0 +1,875 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>ASHA EHR Companion (Rural-ready)</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial; background:#f3f4f6; }
+    .rounded-full-focus:focus { outline: none; box-shadow: 0 0 0 3px rgba(59,130,246,0.25); }
+    #toast { position: fixed; left:50%; transform:translateX(-50%); bottom:2rem; display:none; z-index:50; }
+    .hidden-view{ display:none; }
+    .patient-card:hover{ transform:translateY(-3px); transition: transform .15s; }
+    .big-icon-btn { display:flex; align-items:center; gap:.5rem; justify-content:center; }
+  </style>
+</head>
+<body class="min-h-screen flex items-start justify-center p-4">
+  <div class="w-full max-w-2xl">
+    <!-- Header -->
+    <header class="flex items-center justify-between mb-4">
+      <div class="flex items-center gap-3">
+        <svg xmlns="http://www.w3.org/2000/svg" class="w-10 h-10 text-blue-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M12 3a5 5 0 1 1 -5 5v3" stroke-linecap="round" stroke-linejoin="round"></path>
+          <path d="M12 3a5 5 0 1 1 5 5v3" stroke-linecap="round" stroke-linejoin="round"></path>
+        </svg>
+        <div>
+          <h1 id="appTitle" class="text-2xl font-bold text-gray-800">ASHA EHR</h1>
+          <p id="appSubtitle" class="text-sm text-gray-500">Companion (Offline-first)</p>
+        </div>
+      </div>
+      <div class="flex items-center gap-2">
+        <select id="langToggle" title="Language" class="rounded-full px-3 py-1 border">
+          <option value="en">EN</option>
+          <option value="hi">HI</option>
+          <option value="mr">MR</option>
+        </select>
+        <div id="statusIndicator" class="px-3 py-1 rounded-full font-medium text-white bg-gray-400">Init</div>
+      </div>
+    </header>
+
+    <!-- PIN Lock -->
+    <div id="lockScreen" class="bg-white p-4 rounded-xl shadow mb-4">
+      <h2 id="lockTitle" class="text-lg font-semibold mb-2">Enter PIN</h2>
+      <input id="pinInput" type="password" inputmode="numeric" maxlength="6" placeholder="4-6 digit PIN" class="w-full p-3 border rounded-xl mb-3" />
+      <div class="flex gap-2">
+        <button id="unlockBtn" class="flex-1 bg-blue-600 text-white py-3 rounded-xl">Unlock</button>
+        <button id="setPinBtn" class="flex-1 bg-gray-100 text-gray-700 py-3 rounded-xl">Set PIN</button>
+      </div>
+      <p id="pinHint" class="text-xs text-gray-500 mt-2">This device stores data locally. Set a PIN to protect access.</p>
+    </div>
+
+    <!-- Main App -->
+    <main id="app" class="hidden-view">
+      <div class="bg-white p-4 rounded-xl shadow mb-4">
+        <div class="flex gap-2 mb-3">
+          <input id="searchInput" type="search" placeholder="Search by name or ID..." class="flex-1 p-3 border rounded-xl" />
+          <select id="filterSelect" class="w-44 p-3 border rounded-xl">
+            <option value="all">All</option>
+            <option value="unsynced">Unsynced</option>
+            <option value="synced">Synced</option>
+          </select>
+        </div>
+
+        <div class="flex flex-col sm:flex-row gap-2">
+          <button id="addPatientBtn" class="bg-emerald-600 text-white py-3 rounded-xl flex-1 big-icon-btn">➕ Add Patient</button>
+          <button id="syncButton" class="bg-blue-600 text-white py-3 rounded-xl flex-1 big-icon-btn">🔄 Sync All</button>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <!-- Left: Patient List -->
+        <section class="md:col-span-2">
+          <div id="patientListWrap" class="space-y-3 mb-4"></div>
+        </section>
+
+        <!-- Right: Controls / Analytics / Reminders -->
+        <aside>
+          <div class="bg-white p-4 rounded-xl shadow mb-3">
+            <h3 class="font-semibold mb-2">Analytics</h3>
+            <p class="text-sm text-gray-600">Total patients: <span id="totalPatients">0</span></p>
+            <p class="text-sm text-gray-600">Unsynced: <span id="unsyncedCount">0</span></p>
+            <p class="text-sm text-gray-600">Last sync: <span id="lastSync">—</span></p>
+          </div>
+
+          <div class="bg-white p-4 rounded-xl shadow space-y-2 mb-3">
+            <button id="exportBtn" class="w-full py-2 rounded-xl border">⬇️ Export JSON</button>
+            <label for="importFile" class="w-full block">
+              <input id="importFile" type="file" accept="application/json" class="hidden" />
+              <button id="importBtn" class="w-full py-2 rounded-xl border">⬆️ Import JSON</button>
+            </label>
+            <button id="backupBtn" class="w-full py-2 rounded-xl border">💾 Local Backup</button>
+            <button id="clearLocalBtn" class="w-full py-2 rounded-xl border text-red-600">🗑 Clear Local Data</button>
+          </div>
+
+          <div id="remindersPanel" class="bg-white p-4 rounded-xl shadow">
+            <h3 class="font-semibold mb-2">⏰ Reminders</h3>
+            <div id="remindersList" class="text-sm text-gray-700">No reminders.</div>
+          </div>
+        </aside>
+      </div>
+
+      <!-- Patient Modal -->
+      <div id="patientModal" class="fixed inset-0 flex items-end sm:items-center justify-center p-4 hidden" >
+        <div class="w-full max-w-2xl bg-white rounded-2xl shadow-lg p-4">
+          <div class="flex justify-between items-center mb-3">
+            <h2 id="modalTitle" class="text-lg font-semibold">Add Patient</h2>
+            <button id="closeModal" class="text-gray-500">Close</button>
+          </div>
+
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label class="text-sm font-medium">Name</label>
+              <div class="flex gap-2">
+                <input id="inpName" class="w-full p-3 border rounded-xl" />
+                <button id="voiceNameBtn" class="px-3 py-2 rounded-xl bg-gray-100">🎤</button>
+              </div>
+            </div>
+            <div>
+              <label class="text-sm font-medium">ID (auto)</label>
+              <input id="inpId" disabled class="w-full p-3 border rounded-xl bg-gray-100" />
+            </div>
+            <div class="sm:col-span-2">
+              <label class="text-sm font-medium">Address</label>
+              <textarea id="inpAddress" rows="2" class="w-full p-3 border rounded-xl"></textarea>
+            </div>
+            <div>
+              <label class="text-sm font-medium">DOB</label>
+              <input id="inpDOB" type="date" class="w-full p-3 border rounded-xl" />
+            </div>
+            <div>
+              <label class="text-sm font-medium">Photo</label>
+              <input id="inpPhoto" type="file" accept="image/*" capture="environment" class="w-full" />
+            </div>
+            <div class="sm:col-span-2">
+              <label class="text-sm font-medium">Notes (voice available)</label>
+              <div class="flex gap-2">
+                <input id="inpNotes" class="flex-1 p-3 border rounded-xl" />
+                <button id="voiceNotesBtn" class="px-3 py-2 bg-gray-100 rounded-xl">🎤</button>
+              </div>
+            </div>
+            <div class="sm:col-span-2">
+              <label class="text-sm font-medium">Follow-up date (optional)</label>
+              <input id="patientFollowUp" type="date" class="w-full p-3 border rounded-xl" />
+              <p class="text-xs text-gray-500 mt-1">Set reminder for follow-up visits.</p>
+            </div>
+          </div>
+
+          <div class="mt-4 flex gap-2">
+            <button id="savePatientBtn" class="flex-1 bg-emerald-600 text-white py-3 rounded-xl">Save</button>
+            <button id="createVisitBtn" class="flex-1 bg-blue-600 text-white py-3 rounded-xl">Add Visit Now</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Visit Modal -->
+      <div id="visitModal" class="fixed inset-0 flex items-end sm:items-center justify-center p-4 hidden">
+        <div class="w-full max-w-xl bg-white rounded-2xl shadow-lg p-4">
+          <div class="flex justify-between items-center mb-3">
+            <h2 id="visitModalTitle" class="text-lg font-semibold">Add Visit</h2>
+            <button id="closeVisit" class="text-gray-500">Close</button>
+          </div>
+
+          <div>
+            <p id="visitPatientLabel" class="text-sm text-gray-600 mb-2"></p>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label class="text-sm font-medium">Visit Type</label>
+                <select id="visitType" class="w-full p-3 border rounded-xl">
+                  <option value="child">Child</option>
+                  <option value="maternal">Maternal</option>
+                </select>
+              </div>
+              <div>
+                <label class="text-sm font-medium">Date</label>
+                <input id="visitDate" type="date" class="w-full p-3 border rounded-xl" />
+              </div>
+
+              <!-- Child fields -->
+              <div id="childFields">
+                <label class="text-sm font-medium">Weight (kg)</label>
+                <input id="visitWeight" type="number" step="0.1" class="w-full p-3 border rounded-xl" />
+                <label class="text-sm font-medium mt-2">Height (cm)</label>
+                <input id="visitHeight" type="number" step="0.1" class="w-full p-3 border rounded-xl" />
+                <div class="flex gap-2 mt-2">
+                  <label class="flex items-center gap-2"><input id="vPolio" type="checkbox" />Polio</label>
+                  <label class="flex items-center gap-2"><input id="vBCG" type="checkbox" />BCG</label>
+                  <label class="flex items-center gap-2"><input id="vMeasles" type="checkbox" />Measles</label>
+                </div>
+              </div>
+
+              <!-- Maternal fields -->
+              <div id="maternalFields" class="hidden">
+                <label class="text-sm font-medium">BP</label>
+                <input id="visitBP" class="w-full p-3 border rounded-xl" />
+                <label class="text-sm font-medium mt-2">Gravida</label>
+                <input id="visitGravida" type="number" class="w-full p-3 border rounded-xl" />
+                <label class="text-sm font-medium mt-2">Delivery Date</label>
+                <input id="visitDOD" type="date" class="w-full p-3 border rounded-xl" />
+                <label class="flex items-center gap-2 mt-2"><input id="visitANC" type="checkbox" />Antenatal complete</label>
+              </div>
+
+              <div class="sm:col-span-2">
+                <label class="text-sm font-medium">Notes (voice)</label>
+                <div class="flex gap-2">
+                  <input id="visitNotes" class="flex-1 p-3 border rounded-xl" />
+                  <button id="voiceVisitBtn" class="px-3 py-2 bg-gray-100 rounded-xl">🎤</button>
+                </div>
+              </div>
+
+              <div class="sm:col-span-2">
+                <label class="text-sm font-medium">Follow-up date (optional)</label>
+                <input id="visitFollowUp" type="date" class="w-full p-3 border rounded-xl" />
+                <p class="text-xs text-gray-500 mt-1">Set reminder after this visit.</p>
+              </div>
+            </div>
+
+            <div class="mt-4 flex gap-2">
+              <button id="saveVisitBtn" class="flex-1 bg-emerald-600 text-white py-3 rounded-xl">Save Visit</button>
+              <button id="saveAndSyncBtn" class="flex-1 bg-blue-600 text-white py-3 rounded-xl">Save & Queue Sync</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </main>
+
+    <!-- Toast -->
+    <div id="toast" class="px-4 py-2 rounded-full text-white"></div>
+  </div>
+
+<script>
+/* =======================
+   Existing IndexedDB + app code (kept structure intact)
+   plus new features added:
+   - localStorage backup/restore
+   - voice input (name, notes, visit notes)
+   - follow-up reminders (patient level + visit level)
+   - expanded language toggle strings (EN/HI/MR)
+   - backup button
+   ======================= */
+
+const DB_NAME = 'ashaEHR_v2';
+const DB_VERSION = 1;
+let db;
+
+function openDB() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(DB_NAME, DB_VERSION);
+    req.onupgradeneeded = (e) => {
+      db = e.target.result;
+      if (!db.objectStoreNames.contains('patients')) db.createObjectStore('patients', { keyPath: 'id' });
+      if (!db.objectStoreNames.contains('syncQueue')) db.createObjectStore('syncQueue', { keyPath: 'qid', autoIncrement: true });
+      if (!db.objectStoreNames.contains('meta')) db.createObjectStore('meta', { keyPath: 'k' });
+    };
+    req.onsuccess = (e) => { db = e.target.result; resolve(db); };
+    req.onerror = (e) => reject(e);
+  });
+}
+
+/* IDB helpers (kept from your app) */
+function idbPut(storeName, value) {
+  return new Promise((res, rej) => {
+    const tx = db.transaction(storeName, 'readwrite');
+    const s = tx.objectStore(storeName);
+    const r = s.put(value);
+    r.onsuccess = () => res(r.result);
+    r.onerror = (e) => rej(e);
+  });
+}
+function idbGetAll(storeName) {
+  return new Promise((res, rej) => {
+    const tx = db.transaction(storeName, 'readonly');
+    const s = tx.objectStore(storeName);
+    const r = s.getAll();
+    r.onsuccess = () => res(r.result);
+    r.onerror = (e) => rej(e);
+  });
+}
+function idbGet(storeName, key) {
+  return new Promise((res, rej) => {
+    const tx = db.transaction(storeName, 'readonly');
+    const s = tx.objectStore(storeName);
+    const r = s.get(key);
+    r.onsuccess = () => res(r.result);
+    r.onerror = (e) => rej(e);
+  });
+}
+function idbDelete(storeName, key) {
+  return new Promise((res, rej) => {
+    const tx = db.transaction(storeName, 'readwrite');
+    const s = tx.objectStore(storeName);
+    const r = s.delete(key);
+    r.onsuccess = () => res();
+    r.onerror = (e) => rej(e);
+  });
+}
+
+/* ===== UI elements (kept largely as before) ===== */
+const toastEl = document.getElementById('toast');
+let toastTimer = null;
+function showToast(msg, type='info') {
+  clearTimeout(toastTimer);
+  toastEl.textContent = msg;
+  toastEl.style.display = 'block';
+  toastEl.style.background = type === 'error' ? '#ef4444' : (type === 'success' ? '#10b981' : '#3b82f6');
+  toastTimer = setTimeout(() => { toastEl.style.display = 'none'; }, 3000);
+}
+function uid() { return 'P-'+Date.now().toString(36).toUpperCase().slice(-8); }
+function toBase64(file) {
+  return new Promise((res, rej) => {
+    if (!file) return res(null);
+    const r = new FileReader();
+    r.onload = () => res(r.result);
+    r.onerror = e => rej(e);
+    r.readAsDataURL(file);
+  });
+}
+
+/* ======= Added: translations for EN / HI / MR (expandable) ======= */
+const strings = {
+  en: {
+    enterPin: 'Enter PIN',
+    unlock: 'Unlock',
+    setPin: 'Set PIN',
+    addPatient: 'Add Patient',
+    save: 'Save',
+    syncAll: 'Sync All',
+    lastSync: 'Last sync',
+    totalPatients: 'Total patients',
+    unsynced: 'Unsynced',
+    export: 'Export JSON',
+    import: 'Import JSON',
+    clearLocal: 'Clear Local Data',
+    reminders: 'Reminders',
+    backup: 'Local Backup'
+  },
+  hi: {
+    enterPin: 'PIN दर्ज करें',
+    unlock: 'अनलॉक',
+    setPin: 'PIN सेट करें',
+    addPatient: 'रोगी जोड़ें',
+    save: 'सहेजें',
+    syncAll: 'सिंक करें',
+    lastSync: 'अंतिम सिंक',
+    totalPatients: 'कुल रोगी',
+    unsynced: 'अनसिंक्ड',
+    export: 'JSON निर्यात करें',
+    import: 'JSON आयात करें',
+    clearLocal: 'स्थानीय डेटा साफ करें',
+    reminders: 'रिमाइंडर',
+    backup: 'लोकल बैकअप'
+  },
+  mr: {
+    enterPin: 'PIN टाका',
+    unlock: 'अनलॉक',
+    setPin: 'PIN सेट करा',
+    addPatient: 'रुग्ण जोडा',
+    save: 'जतन करा',
+    syncAll: 'सिंक करा',
+    lastSync: 'शेवटचे सिंक',
+    totalPatients: 'एकूण रुग्ण',
+    unsynced: 'अनसिंक्ड',
+    export: 'JSON निर्यात करा',
+    import: 'JSON आयात करा',
+    clearLocal: 'स्थानिक डेटा हटवा',
+    reminders: 'स्मरणपत्र',
+    backup: 'लोकल बॅकअप'
+  }
+};
+let lang = 'en';
+
+/* Voice (SpeechRecognition) helper — supports en/hi/mr */
+const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+function startVoiceRecognition(onResult, onEnd) {
+  if (!SpeechRecognition) { showToast('Voice not supported', 'error'); return null; }
+  const rec = new SpeechRecognition();
+  rec.lang = lang === 'hi' ? 'hi-IN' : (lang === 'mr' ? 'mr-IN' : 'en-IN');
+  rec.interimResults = false;
+  rec.maxAlternatives = 1;
+  rec.onresult = (e) => {
+    const t = e.results[0][0].transcript;
+    onResult(t);
+  };
+  rec.onend = () => onEnd && onEnd();
+  rec.start();
+  return rec;
+}
+
+/* ====== App UI elements (kept from your code) ====== */
+const lockScreen = document.getElementById('lockScreen');
+const appEl = document.getElementById('app');
+const pinInput = document.getElementById('pinInput');
+const unlockBtn = document.getElementById('unlockBtn');
+const setPinBtn = document.getElementById('setPinBtn');
+const lockTitle = document.getElementById('lockTitle');
+
+const statusIndicator = document.getElementById('statusIndicator');
+const langToggle = document.getElementById('langToggle');
+
+const addPatientBtn = document.getElementById('addPatientBtn');
+const syncButton = document.getElementById('syncButton');
+const patientListWrap = document.getElementById('patientListWrap');
+
+const modal = document.getElementById('patientModal');
+const closeModal = document.getElementById('closeModal');
+const modalTitle = document.getElementById('modalTitle');
+const inpName = document.getElementById('inpName');
+const inpId = document.getElementById('inpId');
+const inpAddress = document.getElementById('inpAddress');
+const inpDOB = document.getElementById('inpDOB');
+const inpPhoto = document.getElementById('inpPhoto');
+const inpNotes = document.getElementById('inpNotes');
+const voiceBtn = document.getElementById('voiceNotesBtn');
+const voiceNameBtn = document.getElementById('voiceNameBtn');
+const savePatientBtn = document.getElementById('savePatientBtn');
+const createVisitBtn = document.getElementById('createVisitBtn');
+const patientFollowUp = document.getElementById('patientFollowUp');
+
+const visitModal = document.getElementById('visitModal');
+const closeVisit = document.getElementById('closeVisit');
+const visitPatientLabel = document.getElementById('visitPatientLabel');
+const visitType = document.getElementById('visitType');
+const visitDate = document.getElementById('visitDate');
+const childFields = document.getElementById('childFields');
+const maternalFields = document.getElementById('maternalFields');
+const visitWeight = document.getElementById('visitWeight');
+const visitHeight = document.getElementById('visitHeight');
+const vPolio = document.getElementById('vPolio');
+const vBCG = document.getElementById('vBCG');
+const vMeasles = document.getElementById('vMeasles');
+const visitBP = document.getElementById('visitBP');
+const visitGravida = document.getElementById('visitGravida');
+const visitDOD = document.getElementById('visitDOD');
+const visitANC = document.getElementById('visitANC');
+const visitNotes = document.getElementById('visitNotes');
+const voiceVisitBtn = document.getElementById('voiceVisitBtn');
+const saveVisitBtn = document.getElementById('saveVisitBtn');
+const saveAndSyncBtn = document.getElementById('saveAndSyncBtn');
+const visitFollowUp = document.getElementById('visitFollowUp');
+
+const totalPatientsEl = document.getElementById('totalPatients');
+const unsyncedCountEl = document.getElementById('unsyncedCount');
+const lastSyncEl = document.getElementById('lastSync');
+
+const searchInput = document.getElementById('searchInput');
+const filterSelect = document.getElementById('filterSelect');
+const exportBtn = document.getElementById('exportBtn');
+const importFile = document.getElementById('importFile');
+const importBtn = document.getElementById('importBtn');
+const clearLocalBtn = document.getElementById('clearLocalBtn');
+const backupBtn = document.getElementById('backupBtn');
+const remindersList = document.getElementById('remindersList');
+
+/* ======= Application logic (keeps original flow) ======= */
+
+let currentEditingPatient = null;
+let activeVoiceRec = null;
+let activeVoiceVisitRec = null;
+
+function setStatus(online) {
+  if (online) {
+    statusIndicator.textContent = 'Online';
+    statusIndicator.style.background = '#059669';
+    syncButton.disabled = false;
+  } else {
+    statusIndicator.textContent = 'Offline';
+    statusIndicator.style.background = '#dc2626';
+    syncButton.disabled = true;
+  }
+}
+
+/* PIN meta */
+async function getPin() { const m = await idbGet('meta', 'pin'); return m?.v || null; }
+async function setPin(pin) { await idbPut('meta', { k:'pin', v:pin }); }
+
+/* ---------- localStorage backup/restore (NEW) ---------- */
+/* Purpose: keep a local JSON backup in addition to IndexedDB.
+   This helps users when they accidentally clear site storage or need quick export.
+*/
+function saveLocalBackup() {
+  Promise.all([idbGetAll('patients'), idbGetAll('syncQueue'), idbGetAll('meta')]).then(([patients, queue, meta]) => {
+    const payload = { patients, queue, meta, exportedAt: new Date().toISOString() };
+    try {
+      localStorage.setItem('asha_local_backup', JSON.stringify(payload));
+      showToast('Local backup saved', 'success');
+    } catch (e) {
+      showToast('Backup failed (storage limit)', 'error');
+    }
+  });
+}
+function tryRestoreFromLocalBackup() {
+  const data = localStorage.getItem('asha_local_backup');
+  if (!data) return;
+  try {
+    const parsed = JSON.parse(data);
+    if (parsed.patients && parsed.patients.length) {
+      // restore patients into IndexedDB (won't duplicate if same IDs)
+      parsed.patients.forEach(async p => { await idbPut('patients', p); });
+      if (parsed.meta) parsed.meta.forEach(async m => await idbPut('meta', m));
+      if (parsed.queue) parsed.queue.forEach(async q => await idbPut('syncQueue', q));
+      showToast('Restored data from local backup', 'success');
+    }
+  } catch (e) {
+    console.warn('Restore failed', e);
+  }
+}
+
+/* ---------- Render & utility functions (extended) ---------- */
+async function renderPatients() {
+  const patients = await idbGetAll('patients');
+  const q = searchInput.value.trim().toLowerCase();
+  const f = filterSelect.value;
+  let list = patients.sort((a,b) => (b.createdAt||0)-(a.createdAt||0));
+  if (f === 'unsynced') list = list.filter(p => p.unsynced);
+  if (f === 'synced') list = list.filter(p => !p.unsynced);
+  if (q) list = list.filter(p => (p.name||'').toLowerCase().includes(q) || (p.id||'').toLowerCase().includes(q));
+
+  patientListWrap.innerHTML = '';
+  if (list.length === 0) {
+    patientListWrap.innerHTML = '<div class="bg-white p-4 rounded-xl shadow text-center text-gray-500">No patients found.</div>';
+  } else {
+    for (const p of list) {
+      const div = document.createElement('div');
+      div.className = 'bg-white p-3 rounded-xl shadow flex items-center justify-between patient-card';
+      div.innerHTML = `
+        <div class="flex items-center gap-3">
+          <div class="w-12 h-12 bg-gray-100 rounded-full overflow-hidden flex items-center justify-center">
+            ${p.photo ? `<img src="${p.photo}" class="w-full h-full object-cover">` : `<span class="text-sm text-gray-400">No Photo</span>`}
+          </div>
+          <div>
+            <div class="font-semibold text-gray-800">${p.name}</div>
+            <div class="text-xs text-gray-500">ID: ${p.id} • DOB: ${p.dob||'—'}</div>
+          </div>
+        </div>
+        <div class="flex items-center gap-2">
+          <span class="px-2 py-1 rounded-full text-xs ${p.unsynced ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'}">${p.unsynced ? 'Unsynced' : 'Synced'}</span>
+          <button class="text-sm text-blue-600 viewBtn" data-id="${p.id}">View</button>
+          <button class="text-sm text-green-600 editBtn" data-id="${p.id}">Edit</button>
+        </div>
+      `;
+      patientListWrap.appendChild(div);
+    }
+  }
+  const all = await idbGetAll('patients');
+  totalPatientsEl.textContent = all.length;
+  unsyncedCountEl.textContent = all.filter(x => x.unsynced).length;
+  // update reminders each render
+  renderReminders();
+}
+
+/* ---------- Save patient (keeps your logic but adds follow-up & backup) ---------- */
+async function openAddPatientModal(existing) {
+  currentEditingPatient = existing || null;
+  modalTitle.textContent = existing ? 'Edit Patient' : 'Add Patient';
+  if (existing) {
+    const p = await idbGet('patients', existing);
+    inpName.value = p.name || '';
+    inpId.value = p.id || '';
+    inpAddress.value = p.address || '';
+    inpDOB.value = p.dob || '';
+    inpNotes.value = p.notes || '';
+    patientFollowUp.value = p.followUp || '';
+  } else {
+    inpName.value = '';
+    inpId.value = uid();
+    inpAddress.value = '';
+    inpDOB.value = '';
+    inpNotes.value = '';
+    patientFollowUp.value = '';
+  }
+  modal.classList.remove('hidden');
+}
+closeModal.addEventListener('click', () => modal.classList.add('hidden'));
+
+savePatientBtn.addEventListener('click', async () => {
+  const name = inpName.value.trim();
+  if (!name) return showToast('Please enter name', 'error');
+  const id = inpId.value || uid();
+  const photoFile = inpPhoto.files[0];
+  const photoB64 = photoFile ? await toBase64(photoFile) : (currentEditingPatient ? (await idbGet('patients', currentEditingPatient)).photo : null);
+  const patient = {
+    id,
+    name,
+    address: inpAddress.value.trim(),
+    dob: inpDOB.value || null,
+    notes: inpNotes.value || '',
+    photo: photoB64 || null,
+    createdAt: Date.now(),
+    unsynced: true,
+    followUp: patientFollowUp.value || null,
+    child_visits: (currentEditingPatient ? (await idbGet('patients', currentEditingPatient)).child_visits : []) || [],
+    maternal_visits: (currentEditingPatient ? (await idbGet('patients', currentEditingPatient)).maternal_visits : []) || []
+  };
+  await idbPut('patients', patient);
+  showToast('Patient saved', 'success');
+  modal.classList.add('hidden');
+  await renderPatients();
+  saveLocalBackup(); // create local backup after change
+});
+
+createVisitBtn.addEventListener('click', async () => {
+  modal.classList.add('hidden');
+  const id = inpId.value || uid();
+  if (!currentEditingPatient) {
+    // ensure patient saved before opening visit
+    await savePatientBtn.click();
+  }
+  await openVisitModal(id, inpName.value || 'Patient');
+});
+
+/* Open visit modal */
+async function openVisitModal(patientId, patientName) {
+  visitModal.classList.remove('hidden');
+  visitPatientLabel.textContent = `For: ${patientName} (ID: ${patientId})`;
+  visitModal.dataset.pid = patientId;
+  visitDate.value = new Date().toISOString().split('T')[0];
+  visitType.value = 'child';
+  toggleVisitFields();
+  visitNotes.value = '';
+  visitWeight.value = '';
+  visitHeight.value = '';
+  visitBP.value = '';
+  visitGravida.value = '';
+  visitFollowUp.value = '';
+}
+
+/* toggle fields based on visit type */
+function toggleVisitFields() {
+  if (visitType.value === 'child') {
+    childFields.classList.remove('hidden');
+    maternalFields.classList.add('hidden');
+  } else {
+    childFields.classList.add('hidden');
+    maternalFields.classList.remove('hidden');
+  }
+}
+visitType.addEventListener('change', toggleVisitFields);
+closeVisit.addEventListener('click', () => visitModal.classList.add('hidden'));
+
+/* Save visit (keeps original logic + follow-up & backup) */
+async function saveVisit(queueSync=false) {
+  const pid = visitModal.dataset.pid;
+  const p = await idbGet('patients', pid);
+  if (!p) return showToast('Patient not found', 'error');
+  const v = { date: visitDate.value || new Date().toISOString().split('T')[0], notes: visitNotes.value || '' };
+  if (visitType.value === 'child') {
+    v.weight = parseFloat(visitWeight.value) || null;
+    v.height = parseFloat(visitHeight.value) || null;
+    v.immunizations = { polio: vPolio.checked, bcg: vBCG.checked, measles: vMeasles.checked };
+    p.child_visits = p.child_visits || [];
+    p.child_visits.push(v);
+  } else {
+    v.bp = visitBP.value || null;
+    v.gravida = parseInt(visitGravida.value || 0, 10) || null;
+    v.dod = visitDOD.value || null;
+    v.antenatalCare = visitANC.checked;
+    p.maternal_visits = p.maternal_visits || [];
+    p.maternal_visits.push(v);
+  }
+  // follow-up set on visit overrides patient-level followUp if provided
+  if (visitFollowUp.value) p.followUp = visitFollowUp.value;
+  p.unsynced = true;
+  await idbPut('patients', p);
+
+  if (queueSync) await idbPut('syncQueue', { type: 'patient_sync', patientId: p.id, timestamp: Date.now() });
+
+  showToast('Visit saved', 'success');
+  visitModal.classList.add('hidden');
+  await renderPatients();
+  saveLocalBackup(); // backup after change
+}
+
+/* Save visit buttons */
+saveVisitBtn.addEventListener('click', async () => saveVisit(false));
+saveAndSyncBtn.addEventListener('click', async () => saveVisit(true));
+
+/* Delegated list actions */
+patientListWrap.addEventListener('click', async (e) => {
+  const viewBtn = e.target.closest('.viewBtn');
+  const editBtn = e.target.closest('.editBtn');
+  if (viewBtn) {
+    const id = viewBtn.dataset.id;
+    const p = await idbGet('patients', id);
+    currentEditingPatient = id;
+    inpName.value = p.name; inpId.value = p.id; inpAddress.value = p.address; inpDOB.value = p.dob || ''; inpNotes.value = p.notes || '';
+    patientFollowUp.value = p.followUp || '';
+    modalTitle.textContent = 'Patient Details';
+    modal.classList.remove('hidden');
+  }
+  if (editBtn) {
+    const id = editBtn.dataset.id;
+    currentEditingPatient = id;
+    await openAddPatientModal(id);
+  }
+});
+
+/* Search & filters */
+searchInput.addEventListener('input', renderPatients);
+filterSelect.addEventListener('change', renderPatients);
+
+/* Sync queue processing (kept but simplified) */
+async function processSyncQueue() {
+  const q = await idbGetAll('syncQueue');
+  if (q.length === 0) { showToast('Nothing to sync', 'info'); return; }
+  if (!navigator.onLine) { showToast('Offline — sync queued', 'error'); return; }
+
+  showToast('Syncing...', 'info');
+  for (const entry of q) {
+    await new Promise(r => setTimeout(r, 600));
+    if (entry.patientId) {
+      const p = await idbGet('patients', entry.patientId);
+      if (p) { p.unsynced = false; await idbPut('patients', p); }
+    }
+    await idbDelete('syncQueue', entry.qid);
+  }
+  const now = new Date();
+  await idbPut('meta', { k: 'lastSync', v: now.toISOString() });
+  lastSyncEl.textContent = now.toLocaleString();
+  showToast('Sync complete', 'success');
+  await renderPatients();
+}
+
+/* Manual Sync button: queue unsynced + process */
+syncButton.addEventListener('click', async () => {
+  const patients = await idbGetAll('patients');
+  const unsynced = patients.filter(p => p.unsynced);
+  if (unsynced.length === 0) return showToast('No records to sync', 'info');
+  for (const p of unsynced) await idbPut('syncQueue', { type: 'patient_sync', patientId: p.id, timestamp: Date.now() });
+  await processSyncQueue();
+});
+
+/* Export / Import (kept) */
+exportBtn.addEventListener('click', async () => {
+  const patients = await idbGetAll('patients');
+  const meta = await idbGetAll('meta');
+  const payload = { patients, meta, exportedAt: new Date().toISOString() };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `asha_ehr_export_${Date.now()}.json`; a.click(); URL.revokeObjectURL(url);
+});
+importFile.addEventListener('change', async (e) => {
+  const f = e.target.files[0]; if (!f) return;
+  const txt = await f.text();
+  try {
+    const data = JSON.parse(txt);
+    if (data.patients && Array.isArray(data.patients)) {
+      for (const p of data.patients) await idbPut('patients', p);
+      if (data.meta && Array.isArray(data.meta)) for (const m of data.meta) await idbPut('meta', m);
+      showToast('Import complete', 'success'); await renderPatients(); saveLocalBackup();
+    } else showToast('Invalid file', 'error');
+  } catch (err) { showToast('Import failed', 'error'); }
+});
+importBtn.addEventListener('click', () => importFile.click());
+
+/* Clear local data (kept) */
+clearLocalBtn.addEventListener('click', async () => {
+  if (!confirm('Clear all local data? This cannot be undone.')) return;
+  const tx = db.transaction(['patients','syncQueue','meta'], 'readwrite');
+  tx.objectStore('patients').clear(); tx.objectStore('syncQueue').clear(); tx.objectStore('meta').clear();
+  tx.oncomplete = async () => {
+    showToast('Local data cleared', 'success');
+    localStorage.removeItem('asha_local_backup');
+    await renderPatients();
+  };
+});
+
+/* Backup button (manual) */
+backupBtn.addEventListener('click', saveLocalBackup);
+
+/* PIN auth handlers (kept) */
+unlockBtn.addEventListener('click', async () => {
+  const stored = await getPin();
+  if (!stored) return showToast('No PIN set — set a PIN first', 'error');
+  if (pinInput.value === stored) {
+    lockScreen.style.display = 'none';
+    appEl.classList.remove('hidden-view');
+    await renderPatients();
+  } else showToast('Wrong PIN', 'error');
+});
+setPinBtn.addEventListener('click', async () => {
+  const v = pinInput.value.trim(); if (!/^\d{4,6}$/.test(v)) return showToast('Use 4-6 digits', 'error');
+  await setPin(v); showToast('PIN set', 'success');
+});
+
+/* Voice button handlers (NEW) */
+voiceNameBtn.addEventListener('click', () => {
+  if (activeVoiceRec) { activeVoiceRec.onend = null; activeVoiceRec.stop(); activeVoiceRec = null; return; }
+  activeVoiceRec = startVoiceRecognition((t) => { inpName.value = (inpName.value ? inpName.value + ' ' : '') + t; }, () => activeVoiceRec = null);
+});
+voiceNotesBtn.addEventListener('click', () => {
+  if (activeVoiceRec) { activeVoiceRec.onend = null; activeVoiceRec.stop(); activeVoiceRec = null; return; }
+  activeVoiceRec = startVoiceRecognition((t) => { inpNotes.value = (inpNotes.value ? inpNotes.value + ' ' : '') + t; }, () => activeVoiceRec = null);
+});
+voiceVisitBtn.addEventListener('click', () => {
+  if (activeVoiceVisitRec) { activeVoiceVisitRec.onend = null; activeVoiceVisitRec.stop(); activeVoiceVisitRec = null; return; }
+  activeVoiceVisitRec = startVoiceRecognition((t) => { visitNotes.value = (visitNotes.value ? visitNotes.value + ' ' : '') + t; }, () => activeVoiceVisitRec = null);
+});
+
+/* Language toggle (NEW) */
+langToggle.addEventListener('change', () => {
+  lang = langToggle.value;
+  // update a few top-level UI strings (expand as needed)
+  lockTitle.textContent = strings[lang].enterPin;
+  unlockBtn.textContent = strings[lang].unlock;
+  setPinBtn.textContent = strings[lang].setPin;
+  addPatientBtn.textContent = strings[lang].addPatient;
+  syncButton.textContent = strings[lang].syncAll;
+  exportBtn.textContent = strings[lang].export;
+  importBtn.textContent = strings[lang].import;
+  clearLocalBtn.textContent = strings[lang].clearLocal;
+  backupBtn.textContent = strings[lang].backup;
+  document.getElementById('appTitle').textContent = "ASHA EHR";
+  document.getElementById('appSubtitle').textContent = "Companion (Offline-first)";
+  document.getElementById('remindersPanel').querySelector('h3').textContent = `⏰ ${strings[lang].reminders}`;
+});
+
+/* Network status */
+window.addEventListener('online', () => setStatus(true));
+window.addEventListener('offline', () => setStatus(false));
+
+/* ---------- Reminders (NEW) ---------- */
+/* Show upcoming follow-ups that are due today or earlier */
+async function renderReminders() {
+  const patients = await idbGetAll('patients');
+  const today = new Date().toISOString().split('T')[0];
+  const due = [];
+  patients.forEach(p => {
+    if (p.followUp && p.followUp <= today) {
+      due.push({ id: p.id, name: p.name, date: p.followUp });
+    }
+    // also check last visit follow-ups inside visits (child/maternal)
+    (p.child_visits || []).forEach(v => { if (v.followUp && v.followUp <= today) due.push({ id: p.id, name: p.name, date: v.followUp }); });
+    (p.maternal_visits || []).forEach(v => { if (v.followUp && v.followUp <= today) due.push({ id: p.id, name: p.name, date: v.followUp }); });
+  });
+  if (due.length === 0) {
+    remindersList.textContent = 'No reminders.';
+    return;
+  }
+  remindersList.innerHTML = due.map(d => `<div class="mb-2 p-2 rounded border">${d.name} — ${d.date} <button data-id="${d.id}" class="ml-2 text-xs text-blue-600 viewReminderBtn">View</button></div>`).join('');
+}
+
+/* Click handler for reminder "View" */
+document.addEventListener('click', async (e) => {
+  const btn = e.target.closest('.viewReminderBtn');
+  if (!btn) return;
+  const id = btn.dataset.id;
+  const p = await idbGet('patients', id);
+  if (!p) return;
+  currentEditingPatient = id;
+  inpName.value = p.name; inpId.value = p.id; inpAddress.value = p.address; inpDOB.value = p.dob || ''; inpNotes.value = p.notes || '';
+  patientFollowUp.value = p.followUp || '';
+  modalTitle.textContent = 'Patient Details';
+  modal.classList.remove('hidden');
+});
+
+/* ---------- Init ---------- */
+(async function init() {
+  await openDB();
+  setStatus(navigator.onLine);
+  const last = await idbGet('meta','lastSync');
+  if (last) lastSyncEl.textContent = new Date(last.v).toLocaleString();
+  const storedPin = await getPin();
+  if (!storedPin) lockTitle.textContent = strings[lang].enterPin + ' (Set a new PIN)';
+  else lockTitle.textContent = strings[lang].enterPin;
+  tryRestoreFromLocalBackup(); // restore if possible
+  addPatientBtn.addEventListener('click', () => openAddPatientModal(null));
+  await renderPatients();
+  if (navigator.onLine) processSyncQueue();
+  // auto-backup periodically (every 60s) to localStorage
+  setInterval(saveLocalBackup, 60000);
+})();
+</script>
+</body>
+</html>
