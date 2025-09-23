@@ -103,4 +103,6 @@ i'm Bhumika Patil
 
 That project, Improves reliability, accessibility, and efficiency of rural healthcare delivery, directly supporting Digital Health Mission and community health empowerment.
 
+I'm Neha Borkar..
+Ashusetu is a digital platform by AICTE (All India Council for Technical Education).It connects students, alumni, and institutions on a single platform.
 
