@@ -105,4 +105,3 @@ That project, Improves reliability, accessibility, and efficiency of rural healt
 
 I'm Neha Borkar..
 AshaSetu is a mobile-based app designed for ASHA workers (Accredited Social Health Activists).Focused on low-internet connectivity regions to ensure accessibility.
-
